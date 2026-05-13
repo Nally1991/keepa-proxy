@@ -1,0 +1,13 @@
+{
+  "name": "keepa-proxy",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "node-fetch": "^3.3.2"
+  }
+}
