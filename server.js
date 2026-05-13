@@ -124,21 +124,15 @@ app.get("/lookup", checkAuth, async (req, res) => {
     let asin = null;
     let resolvedFrom = null;
 
-    if (isAsin(identifier)) {
-      asin = identifier;
-    } else if (isProductCode(identifier)) {
-      resolvedFrom = await resolveAsinFromCode(domain, identifier);
-
-      if (!resolvedFrom.found || !resolvedFrom.asin) {
-        return res.status(404).json({
-          found: false,
-          code: identifier,
-          domain,
-          message: "No se pudo resolver el código a ASIN",
-          resolvedFrom
-        });
-      }
-
+    if (!resolvedFrom.found || !resolvedFrom.asin) {
+  return res.status(200).json({
+    found: false,
+    code: identifier,
+    domain,
+    message: "No se pudo resolver el código a ASIN. Revisa que el ASIN esté puesto en manualMap dentro de server.js.",
+    resolvedFrom
+  });
+}
       asin = resolvedFrom.asin;
     } else {
       return res.status(400).json({
@@ -150,9 +144,9 @@ app.get("/lookup", checkAuth, async (req, res) => {
     const keepaData = await callKeepaByAsin(domain, asin);
     const simplified = simplifyKeepaProduct(keepaData);
 
-    if (!simplified.found) {
-      return res.status(404).json(simplified);
-    }
+   if (!simplified.found) {
+  return res.status(200).json(simplified);
+}
 
     return res.json({
       ...simplified,
