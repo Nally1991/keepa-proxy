@@ -53,7 +53,7 @@ async function callKeepaByAsin(domain, asin) {
 async function resolveAsinFromCode(domain, code) {
   const manualMap = {
     "8809747923571": {
-      asin: null,
+      asin: B09KNBVCNT,
       title: "MISSHA Vita C Plus Spot Correcting & Firming Ampoule 30ml"
     }
   };
