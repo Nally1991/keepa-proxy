@@ -12,17 +12,13 @@ const PROXY_API_KEY = process.env.PROXY_API_KEY;
 
 app.use(express.json());
 
-function checkAuth(req, res, next) {
-  const apiKey = req.headers["x-api-key"];
+function getProvidedApiKey(req) {
+  return req.headers["x-api-key"] || req.headers["X-Api-Key"] || null;
+}
 
-  if (!apiKey || apiKey !== PROXY_API_KEY) {
-    return res.status(401).json({
-      found: false,
-      message: "API key inválida o ausente"
-    });
-  }
-
-  next();
+function isAuthorized(req) {
+  const providedApiKey = getProvidedApiKey(req);
+  return Boolean(PROXY_API_KEY && providedApiKey && providedApiKey === PROXY_API_KEY);
 }
 
 function isAsin(value) {
@@ -47,7 +43,10 @@ async function callKeepaByAsin(domain, asin) {
   const response = await fetch(url.toString());
   const data = await response.json();
 
-  return data;
+  return {
+    httpStatus: response.status,
+    data
+  };
 }
 
 async function resolveAsinFromCode(domain, code) {
@@ -67,7 +66,7 @@ async function resolveAsinFromCode(domain, code) {
       code,
       domain,
       title: found?.title || null,
-      message: "No se pudo resolver este EAN a ASIN. Revisa manualMap en server.js."
+      message: "No se pudo resolver este EAN a ASIN. El código no está en manualMap."
     };
   }
 
@@ -81,13 +80,16 @@ async function resolveAsinFromCode(domain, code) {
   };
 }
 
-function simplifyKeepaProduct(keepaData) {
+function simplifyKeepaProduct(keepaResult) {
+  const keepaData = keepaResult.data;
   const product = keepaData.products?.[0];
 
   if (!product) {
     return {
       found: false,
-      message: keepaData.error?.message || "Keepa no devolvió productos",
+      source: "keepa",
+      keepaHttpStatus: keepaResult.httpStatus,
+      message: keepaData.error?.message || "Keepa no devolvió productos.",
       tokensLeft: keepaData.tokensLeft ?? null,
       raw: keepaData
     };
@@ -95,6 +97,8 @@ function simplifyKeepaProduct(keepaData) {
 
   return {
     found: true,
+    source: "keepa",
+    keepaHttpStatus: keepaResult.httpStatus,
     asin: product.asin || null,
     domain: product.domainId || null,
     title: product.title || null,
@@ -112,14 +116,49 @@ function simplifyKeepaProduct(keepaData) {
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "ok",
-    name: "Keepa Proxy API"
+    name: "Keepa Proxy API",
+    routes: ["/lookup", "/diagnostic"]
   });
 });
 
-app.get("/lookup", checkAuth, async (req, res) => {
+app.get("/diagnostic", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    proxyApiKeyConfigured: Boolean(PROXY_API_KEY),
+    keepaApiKeyConfigured: Boolean(KEEPA_API_KEY),
+    message: "El servidor está funcionando. Este endpoint no muestra claves privadas."
+  });
+});
+
+app.get("/lookup", async (req, res) => {
   try {
+    if (!isAuthorized(req)) {
+      return res.status(200).json({
+        found: false,
+        authOk: false,
+        message: "PROXY_API_KEY incorrecta o no enviada. Revisa la autenticación del GPT Action.",
+        expectedHeaderName: "x-api-key"
+      });
+    }
+
+    if (!KEEPA_API_KEY) {
+      return res.status(200).json({
+        found: false,
+        authOk: true,
+        message: "Falta KEEPA_API_KEY en Render."
+      });
+    }
+
     const domain = Number(req.query.domain || 9);
     const identifier = String(req.query.identifier || "").trim();
+
+    if (!identifier) {
+      return res.status(200).json({
+        found: false,
+        authOk: true,
+        message: "Falta identifier. Envía un ASIN o un EAN."
+      });
+    }
 
     let asin = null;
     let resolvedFrom = null;
@@ -132,6 +171,7 @@ app.get("/lookup", checkAuth, async (req, res) => {
       if (!resolvedFrom.found || !resolvedFrom.asin) {
         return res.status(200).json({
           found: false,
+          authOk: true,
           code: identifier,
           domain,
           message: "No se pudo resolver el código a ASIN.",
@@ -141,27 +181,28 @@ app.get("/lookup", checkAuth, async (req, res) => {
 
       asin = resolvedFrom.asin;
     } else {
-      return res.status(400).json({
+      return res.status(200).json({
         found: false,
-        message: "Identificador inválido. Usa ASIN o EAN/GTIN/UPC/ISBN."
+        authOk: true,
+        message: "Identificador inválido. Usa ASIN o EAN/GTIN/UPC/ISBN.",
+        identifier
       });
     }
 
-    const keepaData = await callKeepaByAsin(domain, asin);
-    const simplified = simplifyKeepaProduct(keepaData);
-
-    if (!simplified.found) {
-      return res.status(200).json(simplified);
-    }
+    const keepaResult = await callKeepaByAsin(domain, asin);
+    const simplified = simplifyKeepaProduct(keepaResult);
 
     return res.status(200).json({
       ...simplified,
+      authOk: true,
+      requestedIdentifier: identifier,
       resolvedFrom
     });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(200).json({
       found: false,
-      message: "Error en lookup.",
+      authOk: true,
+      message: "Error interno en /lookup.",
       detail: error.message
     });
   }
