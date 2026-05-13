@@ -53,7 +53,7 @@ async function callKeepaByAsin(domain, asin) {
 async function resolveAsinFromCode(domain, code) {
   const manualMap = {
     "8809747923571": {
-      asin: B09KNBVCNT,
+      asin: "B09KNBVCNT",
       title: "MISSHA Vita C Plus Spot Correcting & Firming Ampoule 30ml"
     }
   };
@@ -67,7 +67,7 @@ async function resolveAsinFromCode(domain, code) {
       code,
       domain,
       title: found?.title || null,
-      message: "No se pudo resolver este EAN a ASIN"
+      message: "No se pudo resolver este EAN a ASIN. Revisa manualMap en server.js."
     };
   }
 
@@ -110,7 +110,7 @@ function simplifyKeepaProduct(keepaData) {
 }
 
 app.get("/", (req, res) => {
-  res.json({
+  res.status(200).json({
     status: "ok",
     name: "Keepa Proxy API"
   });
@@ -124,38 +124,44 @@ app.get("/lookup", checkAuth, async (req, res) => {
     let asin = null;
     let resolvedFrom = null;
 
-    if (!resolvedFrom.found || !resolvedFrom.asin) {
-  return res.status(200).json({
-    found: false,
-    code: identifier,
-    domain,
-    message: "No se pudo resolver el código a ASIN. Revisa que el ASIN esté puesto en manualMap dentro de server.js.",
-    resolvedFrom
-  });
-}
+    if (isAsin(identifier)) {
+      asin = identifier;
+    } else if (isProductCode(identifier)) {
+      resolvedFrom = await resolveAsinFromCode(domain, identifier);
+
+      if (!resolvedFrom.found || !resolvedFrom.asin) {
+        return res.status(200).json({
+          found: false,
+          code: identifier,
+          domain,
+          message: "No se pudo resolver el código a ASIN.",
+          resolvedFrom
+        });
+      }
+
       asin = resolvedFrom.asin;
     } else {
       return res.status(400).json({
         found: false,
-        message: "Identificador inválido. Usa ASIN o EAN/GTIN/UPC/ISBN"
+        message: "Identificador inválido. Usa ASIN o EAN/GTIN/UPC/ISBN."
       });
     }
 
     const keepaData = await callKeepaByAsin(domain, asin);
     const simplified = simplifyKeepaProduct(keepaData);
 
-   if (!simplified.found) {
-  return res.status(200).json(simplified);
-}
+    if (!simplified.found) {
+      return res.status(200).json(simplified);
+    }
 
-    return res.json({
+    return res.status(200).json({
       ...simplified,
       resolvedFrom
     });
   } catch (error) {
     return res.status(500).json({
       found: false,
-      message: "Error en lookup",
+      message: "Error en lookup.",
       detail: error.message
     });
   }
